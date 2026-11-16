@@ -1,0 +1,236 @@
+import {CATEGORIES} from '../core/categories.ts'
+import {formatDay, fromDay, monthIndex, monthLabel, monthStart} from '../core/dates.ts'
+import {money} from '../core/money.ts'
+import type {Parsed} from '../core/ask.ts'
+import type {Alert, CategoryId, Day, Recurring, Txn} from '../core/types.ts'
+
+/**
+ * Everything the generative model is asked to do, as plain data: the instruction, the exact
+ * text that would be sent, and (for structured answers) the shape of the reply.
+ *
+ * Keeping the prompts here, free of any SDK, means the consent dialog can show the user the
+ * very same text the model receives, and the tests can check it without a model.
+ */
+export interface Task {
+  /** Short name shown in the ledger and the consent dialog. */
+  label: string
+  system: string
+  prompt: string
+  /** JSON Schema of the reply, for structured tasks. */
+  schema?: JsonSchema
+  /** Upper bound on the reply, in tokens. */
+  maxTokens: number
+}
+
+export type JsonSchema =
+  | {type: 'object'; properties: Record<string, JsonSchema>; required?: string[]}
+  | {type: 'array'; items: JsonSchema}
+  | {type: 'string'; enum?: string[]}
+  | {type: 'boolean'}
+  | {type: 'integer'}
+
+const SPENDING = CATEGORIES.filter(c => c.id !== 'income')
+const CATEGORY_HINTS: Record<string, string> = {
+  housing: 'rent, landlords, property managers, student housing, storage, movers',
+  bills: 'electricity, gas, water, internet, mobile phone, insurance, laundry',
+  groceries: 'supermarkets, food markets, butchers, corner stores, liquor stores',
+  eating_out: 'restaurants, takeaway, food delivery, bars, fast food',
+  coffee: 'coffee shops, cafes, bakeries, bubble tea, donuts, ice cream, snacks',
+  transport: 'rides, taxis, transit, fuel, parking, tolls, car repair, bike share',
+  travel: 'airlines, hotels, hostels, car rental, intercity trains and buses',
+  subscriptions: 'streaming, software, cloud storage, news, apps, memberships',
+  shopping: 'clothes, electronics, books, home goods, hardware, gifts, online marketplaces',
+  health: 'pharmacies, doctors, dentists, opticians, gyms, hairdressers, therapy',
+  education: 'tuition, bookstores, exams, courses, student loans, printing',
+  fun: 'cinema, concerts, museums, games, bowling, theme parks',
+  fees: 'charges made by the bank itself',
+  cash: 'cash withdrawals',
+  transfers: 'money sent to people, card payments, savings and brokerage transfers',
+  other: 'nothing above fits',
+}
+
+/** Sorts merchants no rule could place. One request covers up to about twenty names. */
+export function categoriseTask(merchants: string[]): Task {
+  return {
+    label: 'Sort unfamiliar merchants',
+    system:
+      'You sort merchant names from a bank statement into spending categories. Names are cut short and written the way banks write them. ' +
+      'Answer for every name, in the same order. Set "sure" to false when the name does not tell you what the business sells.',
+    prompt:
+      `Categories:\n${SPENDING.map(c => `- ${c.id}: ${CATEGORY_HINTS[c.id]}`).join('\n')}\n\n` +
+      `Merchants:\n${merchants.map((m, i) => `${i + 1}. ${m}`).join('\n')}`,
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {name: {type: 'string'}, category: {type: 'string', enum: SPENDING.map(c => c.id)}, sure: {type: 'boolean'}},
+        required: ['name', 'category', 'sure'],
+      },
+    },
+    maxTokens: 40 + merchants.length * 30,
+  }
+}
+
+/** Reads the model's reply for `categoriseTask`. Unknown names and categories are dropped, never guessed. */
+export function readCategories(reply: string, merchants: string[]): Map<string, {category: CategoryId; sure: boolean}> {
+  const out = new Map<string, {category: CategoryId; sure: boolean}>()
+  let rows: unknown
+  try {
+    rows = JSON.parse(reply)
+  } catch {
+    return out
+  }
+  if (!Array.isArray(rows)) return out
+  const valid = new Set<string>(SPENDING.map(c => c.id))
+  rows.forEach((row, i) => {
+    if (!row || typeof row !== 'object') return
+    const r = row as {name?: unknown; category?: unknown; sure?: unknown}
+    if (typeof r.category !== 'string' || !valid.has(r.category)) return
+    // Trust the position when the count matches; otherwise match by name.
+    const byName = typeof r.name === 'string' ? merchants.find(m => m === r.name!.toString().toLowerCase().trim()) : undefined
+    const name = rows.length === merchants.length ? merchants[i] : byName
+    if (!name || out.has(name)) return
+    out.set(name, {category: r.category as CategoryId, sure: r.sure !== false})
+  })
+  return out
+}
+
+export type Tone = 'polite' | 'firm'
+
+const ASK: Record<Alert['kind'], string> = {
+  duplicate: 'a refund of the second charge',
+  price_rise: 'either the earlier price back or the cheapest plan that fits, and if neither is possible, cancellation',
+  trial: 'cancellation of the paid plan and a refund of charges taken after the trial, because the trial rolled over without a clear reminder',
+  fee: 'a refund of these fees as a courtesy and an account type that does not carry them',
+  overlap: 'cancellation of this subscription from the next billing date',
+  new_recurring: 'cancellation of this subscription from the next billing date',
+  unusual: 'an explanation of this charge and a correction if it is a mistake',
+}
+
+/**
+ * Drafts the message that asks for the money back. The facts come from the statement lines the
+ * alert is built on; the model only puts them into words.
+ */
+export function draftTask(alert: Alert, lines: Txn[], tone: Tone, toBank: boolean): Task {
+  const facts = lines
+    .slice(-8)
+    .map(t => `- ${formatDay(t.day)}: ${t.raw} ${money(Math.abs(t.amount))}`)
+    .join('\n')
+  return {
+    label: `Draft a message: ${alert.title}`,
+    system:
+      'You write short, clear customer-service messages for a bank or card customer. Use only the facts given. Do not invent order numbers, names, dates or amounts. ' +
+      'Leave [your name] and [last four digits of your card] as placeholders. No subject line, no markdown. Under 130 words.',
+    prompt:
+      `Write a ${tone === 'firm' ? 'firm but civil' : 'polite and friendly'} message to ${toBank ? 'my bank' : 'the merchant\'s customer support'}.\n` +
+      `What happened: ${alert.title}. ${alert.detail}\n` +
+      `Statement lines:\n${facts}\n` +
+      `What I am asking for: ${ASK[alert.kind]}.`,
+    maxTokens: 260,
+  }
+}
+
+/** Explains an unfamiliar descriptor. Only the cleaned merchant name is sent, never amounts or dates. */
+export function explainTask(merchant: string): Task {
+  return {
+    label: `Explain a charge: ${merchant}`,
+    system: 'You explain bank statement descriptors in one or two plain sentences. If the name does not identify a business, say so and suggest how to find out. Never guess a specific company with confidence you do not have.',
+    prompt: `On a card statement, a line reads "${merchant}". What kind of business is this likely to be, and what do prefixes such as SQ, TST or PAYPAL in such lines mean if one applies here?`,
+    maxTokens: 120,
+  }
+}
+
+/** Turns a plain question into a query the app can compute itself. The model never does the sums. */
+export function questionTask(question: string, endDay: Day, merchants: string[]): Task {
+  return {
+    label: 'Understand a question',
+    system:
+      'You translate a question about a bank statement into a query. You never answer the question yourself. ' +
+      'Pick the closest category when the question is about a kind of spending, a merchant when it names or clearly means one from the list, "everything" for all spending.',
+    prompt:
+      `The statement ends on ${formatDay(endDay)}.\n` +
+      `Categories: ${SPENDING.map(c => c.id).join(', ')}.\n` +
+      `Merchants in the statement: ${merchants.slice(0, 80).join('; ')}.\n` +
+      `Question: ${question}`,
+    schema: {
+      type: 'object',
+      properties: {
+        metric: {type: 'string', enum: ['sum', 'count', 'average', 'biggest']},
+        about: {type: 'string', enum: ['category', 'merchant', 'everything', 'income', 'fees', 'subscriptions', 'unknown']},
+        category: {type: 'string', enum: SPENDING.map(c => c.id)},
+        merchants: {type: 'array', items: {type: 'string'}},
+        period: {type: 'string', enum: ['whole_statement', 'this_month', 'last_month', 'named_month', 'last_n_months', 'last_n_days', 'since_month']},
+        month: {type: 'integer'},
+        n: {type: 'integer'},
+      },
+      required: ['metric', 'about', 'period'],
+    },
+    maxTokens: 120,
+  }
+}
+
+export interface AiQuery {
+  parsed: Parsed
+  about: 'category' | 'merchant' | 'everything' | 'income' | 'fees' | 'subscriptions' | 'unknown'
+  category?: CategoryId
+  merchants: string[]
+}
+
+/** Reads the model's reply for `questionTask` and works out the date range locally. */
+export function readQuestion(reply: string, question: string, endDay: Day, known: string[]): AiQuery | null {
+  let q: any
+  try {
+    q = JSON.parse(reply)
+  } catch {
+    return null
+  }
+  if (!q || typeof q !== 'object') return null
+  const metric = ['sum', 'count', 'average', 'biggest'].includes(q.metric) ? q.metric : 'sum'
+  const about = ['category', 'merchant', 'everything', 'income', 'fees', 'subscriptions'].includes(q.about) ? q.about : 'unknown'
+  const thisMonth = monthIndex(endDay)
+  const n = Number.isInteger(q.n) && q.n > 0 && q.n < 400 ? q.n : 0
+  const month = Number.isInteger(q.month) && q.month >= 1 && q.month <= 12 ? q.month : 0
+  let range: Parsed['range'] = null
+  const named = () => {
+    let idx = fromDay(endDay).y * 12 + (month - 1)
+    if (idx > thisMonth) idx -= 12
+    return idx
+  }
+  if (q.period === 'this_month') range = {from: monthStart(thisMonth), to: endDay, label: monthLabel(thisMonth, true)}
+  else if (q.period === 'last_month') range = {from: monthStart(thisMonth - 1), to: monthStart(thisMonth) - 1, label: monthLabel(thisMonth - 1, true)}
+  else if (q.period === 'named_month' && month) range = {from: monthStart(named()), to: monthStart(named() + 1) - 1, label: monthLabel(named(), true)}
+  else if (q.period === 'since_month' && month) range = {from: monthStart(named()), to: endDay, label: `since ${monthLabel(named(), true)}`}
+  else if (q.period === 'last_n_months' && n) range = {from: monthStart(thisMonth - n + 1), to: endDay, label: `the last ${n} months`}
+  else if (q.period === 'last_n_days' && n) range = {from: endDay - n + 1, to: endDay, label: `the last ${n} days`}
+  const valid = new Set<string>(SPENDING.map(c => c.id))
+  const category = typeof q.category === 'string' && valid.has(q.category) ? (q.category as CategoryId) : undefined
+  // Only merchants that really are in the statement; the model is not allowed to add any.
+  const merchants = Array.isArray(q.merchants) ? known.filter(k => q.merchants.some((m: unknown) => typeof m === 'string' && m.toLowerCase().trim() === k)) : []
+  if (about === 'category' && !category) return null
+  if (about === 'merchant' && !merchants.length) return null
+  if (about === 'unknown') return null
+  return {parsed: {metric, range, subject: question, fixed: null}, about, ...(category ? {category} : {}), merchants}
+}
+
+/** A short plain-language summary. Every number is computed by the app and handed over as a fact. */
+export function summaryTask(facts: string[]): Task {
+  return {
+    label: 'Write a plain summary',
+    system: 'You summarise a bank statement for its owner in four or five plain sentences. Use only the facts given and repeat amounts exactly. No advice about what to cancel, no markdown, no greeting.',
+    prompt: `Facts:\n${facts.map(f => `- ${f}`).join('\n')}`,
+    maxTokens: 220,
+  }
+}
+
+/** The facts handed to `summaryTask`. */
+export function summaryFacts(o: {start: Day; end: Day; spent: number; cameIn: number; top: {label: string; total: number}[]; regular: Recurring[]; alerts: Alert[]; loose: number}): string[] {
+  const facts = [
+    `Statement from ${formatDay(o.start)} to ${formatDay(o.end)}.`,
+    `Money out ${money(o.spent)}, money in ${money(o.cameIn)}.`,
+    `Largest spending categories: ${o.top.slice(0, 3).map(c => `${c.label} ${money(c.total)}`).join(', ')}.`,
+    `${o.regular.filter(r => r.active).length} regular charges cost ${money(o.regular.filter(r => r.active && r.category !== 'transfers').reduce((s, r) => s + r.yearly, 0), true)} a year.`,
+  ]
+  for (const a of o.alerts.slice(0, 6)) facts.push(`${a.title}: ${a.detail}`)
+  if (o.loose > 0) facts.push(`Fees, price rises and double charges add up to ${money(o.loose, true)} a year.`)
+  return facts
+}

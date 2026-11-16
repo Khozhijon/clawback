@@ -1,0 +1,24 @@
+{
+  "private": true,
+  "name": "clawback",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.ts",
+    "dev": "node tools/build.ts && node tools/serve.ts",
+    "test": "tsc --noEmit && node --test \"tests/*.test.ts\"",
+    "qa": "node tools/qa.cjs"
+  },
+  "dependencies": {
+    "firebase": "^12.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

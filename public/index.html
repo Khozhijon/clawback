@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The browser may only talk to this page's own address and to Firebase (AI Logic and App Check). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://firebasevertexai.googleapis.com https://firebaseappcheck.googleapis.com https://content-firebaseappcheck.googleapis.com https://www.google.com https://recaptchaenterprise.googleapis.com; script-src 'self' 'wasm-unsafe-eval' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Clawback</title>
+<meta name="description" content="Finds the money leaking from your bank statement and writes the messages that get it back. The AI runs on your device; anything sent to the cloud is shown to you first.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <a class="brand" href="./" aria-label="Clawback, start page">
+    <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" class="coin"/><path d="M27 13.5a9 9 0 1 0 2 9.5M29 12v6h-6" class="coin-mark"/></svg>
+    <span>Clawback</span>
+  </a>
+  <button class="pill" id="ai-pill" type="button" aria-haspopup="dialog">
+    <span class="dot" aria-hidden="true"></span><span id="ai-pill-text">Checking the on-device model</span>
+  </button>
+</header>
+
+<main id="main">
+  <section id="start" class="start">
+    <div class="start-copy">
+      <h1>Find the money that leaked. Then ask for it back.</h1>
+      <p class="lead">Drop in a bank statement. Clawback finds double charges, price rises, forgotten trials and bank fees, and an AI model <strong>on your own device</strong> writes the refund and cancellation messages for you.</p>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a statement file">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 6h20l8 8v28H10z" class="sheet"/><path d="M30 6v8h8M16 22h16M16 28h16M16 34h9" class="sheet-lines"/></svg>
+        <p><strong>Drop a statement here</strong> or <span class="linkish">choose a file</span></p>
+        <p class="hint">CSV from any bank. The file is read by your browser.</p>
+        <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+      </div>
+      <p class="or">No statement to hand? <button type="button" class="btn primary" id="try-sample">Try the sample statement</button></p>
+      <p class="error" id="start-error" role="alert" hidden></p>
+    </div>
+    <ol class="steps" aria-label="How it works">
+      <li><b>1</b><div><h2>It finds the leaks</h2><p>Charges on a rhythm, prices that crept up, the same bill taken twice, a $1 trial that became $22.99 a month, fees your bank hoped you would not add up. Plain arithmetic, shown with the lines behind it.</p></div></li>
+      <li><b>2</b><div><h2>It writes the message</h2><p>For each leak, a refund or cancellation message drafted by Gemini Nano inside Chrome. Your statement lines are used on this device and go nowhere.</p></div></li>
+      <li><b>3</b><div><h2>You hold the switch</h2><p>If your device has no built-in model, the cloud can step in, but only after you have seen the exact text that would be sent and said yes. Every request is listed in a ledger.</p></div></li>
+    </ol>
+  </section>
+
+  <div id="app" hidden>
+    <div class="bar">
+      <p id="file-line"></p>
+      <div class="bar-actions">
+        <span class="status" id="model-status" role="status" aria-live="polite"></span>
+        <button type="button" class="btn quiet" data-act="export">Save as CSV</button>
+        <button type="button" class="btn quiet" data-act="reset">Start over</button>
+      </div>
+    </div>
+    <section id="headline" aria-label="Summary"></section>
+    <section id="alerts" aria-labelledby="alerts-h"></section>
+    <section id="regular" aria-labelledby="regular-h"></section>
+    <section id="review" aria-labelledby="review-h"></section>
+    <section id="where" aria-labelledby="where-h"></section>
+    <section id="ask" aria-labelledby="ask-h"></section>
+    <section id="lines" aria-labelledby="lines-h"></section>
+  </div>
+</main>
+
+<footer class="foot">
+  <p><b>How the AI is used.</b> Every generative request goes through Firebase AI Logic. On-device requests use Gemini Nano in Chrome; cloud requests use Gemini through the same SDK and happen only with your say. Sums, dates and alerts are computed by ordinary code, never by the model.</p>
+  <p>Clawback does not give financial advice. It adds up what your statement already says and helps you write to the people who took the money.</p>
+</footer>
+
+<dialog id="ai-dialog" aria-labelledby="ai-h">
+  <h2 id="ai-h">Where the AI runs</h2>
+  <p id="ai-device-line" class="proof"></p>
+  <div id="ai-download" hidden>
+    <button type="button" class="btn primary" id="ai-download-btn">Download the on-device model</button>
+    <p class="hint">A one-time download by Chrome (several GB). After that, drafting works with no network.</p>
+    <p id="ai-download-progress" class="hint" role="status" aria-live="polite"></p>
+  </div>
+  <fieldset class="policy">
+    <legend>If the on-device model is not available</legend>
+    <label><input type="radio" name="policy" value="device"> <span><b>Stay on this device.</b> AI features wait until the model is ready. Nothing is ever sent.</span></label>
+    <label><input type="radio" name="policy" value="ask"> <span><b>Ask me each time.</b> Show me the exact text first; send it to Gemini in the cloud only if I say yes.</span></label>
+    <label><input type="radio" name="policy" value="allow"> <span><b>Use the cloud without asking.</b> Still listed in the ledger below.</span></label>
+  </fieldset>
+  <h3>Ledger for this session</h3>
+  <p id="ledger-total" class="proof"></p>
+  <ol id="ledger" class="ledger"></ol>
+  <button type="button" class="btn primary" data-close>Close</button>
+</dialog>
+
+<dialog id="consent" aria-labelledby="consent-h">
+  <h2 id="consent-h">Send this to the cloud?</h2>
+  <p>The on-device model is not ready, so this request would go to Gemini through Firebase. This is the complete text that would leave your device:</p>
+  <pre id="consent-text" tabindex="0"></pre>
+  <p class="hint" id="consent-size"></p>
+  <div class="row">
+    <button type="button" class="btn primary" id="consent-yes">Send it</button>
+    <button type="button" class="btn" id="consent-no">Do not send</button>
+  </div>
+</dialog>
+
+<dialog id="draft" aria-labelledby="draft-h">
+  <h2 id="draft-h">Message</h2>
+  <p id="draft-about" class="hint"></p>
+  <div class="row">
+    <label>Tone <select id="draft-tone"><option value="polite">Polite</option><option value="firm">Firm</option></select></label>
+    <label>To <select id="draft-to"><option value="merchant">The merchant</option><option value="bank">My bank</option></select></label>
+    <button type="button" class="btn quiet" id="draft-again">Write it again</button>
+  </div>
+  <label class="sr" for="draft-text">The drafted message</label>
+  <textarea id="draft-text" rows="11" spellcheck="true"></textarea>
+  <p id="draft-where" class="where-line" role="status" aria-live="polite"></p>
+  <div class="row">
+    <button type="button" class="btn primary" id="draft-copy">Copy</button>
+    <button type="button" class="btn" data-close>Close</button>
+  </div>
+</dialog>
+
+<div id="why" class="why" role="dialog" aria-label="Why this category" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+node_modules/
+*.map
+.DS_Store
+.claude/
+submission/video-tmp/
+submission/*.zip
+submission/DEVPOST.md
