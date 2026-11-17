@@ -116,8 +116,15 @@ export class FirebaseEngine implements Engine {
     await model.initializeDeviceModel(onProgress)
   }
 
+  /**
+   * The cloud path needs App Check to vouch for the page: a debug token on a development machine
+   * (or one passed with ?appcheck=), a reCAPTCHA Enterprise site key anywhere else. Without one,
+   * a request would be refused, so the app says the cloud is not set up instead of asking for consent.
+   */
   cloudConfigured(): boolean {
-    return configured
+    if (!configured) return false
+    const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    return local || RECAPTCHA_ENTERPRISE_SITE_KEY !== '' || new URLSearchParams(location.search).has('appcheck')
   }
 
   async run(task: Task, where: Where, onText?: (soFar: string) => void): Promise<Reply> {
