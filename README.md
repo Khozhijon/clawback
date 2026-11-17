@@ -30,10 +30,10 @@ make a promise most AI finance tools cannot:
 | Task | Sent to the model | Reply |
 | --- | --- | --- |
 | Draft a refund, cancellation or fee-waiver message | the alert and at most eight statement lines | streamed text |
-| Sort merchants no rule could place | merchant names only, no amounts or dates | JSON, constrained by a schema |
+| Sort merchants no rule could place | merchant names only, no amounts or dates | JSON, constrained by a schema; each answer repeats the name it is for |
 | Understand a plain question | the question and the merchant names | JSON query; the app does the sums |
-| Explain an unfamiliar charge | one merchant name | one or two sentences |
-| Put the statement in plain words | figures the app has already computed | four or five sentences |
+| Explain an unfamiliar charge | one merchant name | one or two sentences (what "SQ" or "TST" means is looked up, not asked) |
+| Put the statement in plain words | figures the app has already computed | four or five sentences; a reply with a figure that was not given is thrown away |
 
 The model never adds anything up. Totals, dates, regular charges and alerts come from ordinary,
 tested code (`src/core`). Structured replies are checked strictly: an unknown category or a
@@ -52,6 +52,25 @@ merchant that is not in the statement is dropped, not trusted (`src/ai/tasks.ts`
 - **App Check** protects the cloud path. The page's Content Security Policy only allows
   connections to its own address and to Firebase.
 
+## What testing with the real models changed
+
+The first versions passed every automated check and still failed on real models. Three fixes came
+out of running Gemini Nano in Chrome and Gemini in the cloud side by side:
+
+- **Sorting.** Asked for a plain list of twelve answers, Gemini Nano often returned eleven or
+  thirteen, and with numbered slots it pinned categories on the wrong merchants. Now every answer
+  must begin with the merchant's name, chosen from the names that were asked, and answers are
+  matched by name. Answers that are missing are asked again; nothing is guessed.
+- **Summary.** Nano sometimes merged two figures into a new one. The app now compares every dollar
+  amount in the reply with the facts it supplied, asks once more if one is new, and otherwise
+  shows the facts as computed.
+- **Explaining a charge.** Nano confidently invented a meaning for "SQ". Payment prefixes are now
+  looked up in code and the model is only asked what kind of business the name suggests.
+
+Measured on a MacBook Air (Apple silicon), Chrome 157, sample statement of 400 lines: a refund
+message in about 6 s on the device and 2 s in the cloud; twenty unfamiliar merchants sorted in
+about 25 s on the device; a question understood in 3 to 5 s on the device.
+
 ## Run it
 
 Needs Node 22.18 or newer and desktop Chrome 139 or newer for the on-device model.
@@ -67,7 +86,7 @@ in the Firebase console, and register an App Check debug token for local use (op
 the on-device model; the cloud choices are switched off.
 
 ```bash
-npm test           # type check and 31 unit tests
+npm test           # type check and 33 unit tests
 npm run qa         # 8 end-to-end browser scenarios (needs "npm run dev" running and Playwright)
 ```
 
@@ -80,7 +99,7 @@ consent, streaming and ledger code as the real engine.
 - CSV only; PDF statements are not read.
 - The known-merchant list is mostly US names.
 - The on-device model handles one request at a time and up to about 9,000 tokens, so merchants
-  are sorted in batches of fifteen.
+  are sorted in batches of twelve.
 - It adds up what the statement says and helps you write to whoever took the money. It does not
   give financial advice.
 
