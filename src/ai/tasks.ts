@@ -139,10 +139,26 @@ export function draftTask(alert: Alert, lines: Txn[], tone: Tone, toBank: boolea
 export function explainTask(merchant: string): Task {
   return {
     label: `Explain a charge: ${merchant}`,
-    system: 'You explain bank statement descriptors in one or two plain sentences. If the name does not identify a business, say so and suggest how to find out. Never guess a specific company with confidence you do not have.',
-    prompt: `On a card statement, a line reads "${merchant}". What kind of business is this likely to be, and what do prefixes such as SQ, TST or PAYPAL in such lines mean if one applies here?`,
-    maxTokens: 120,
+    system: 'You explain names from bank statements in one or two plain sentences, with no lists and no markdown. If the name does not identify a business, say so and suggest how to find out. Never name a specific company with confidence you do not have.',
+    prompt: `On a card statement, a line reads "${merchant}". What kind of business is this likely to be?`,
+    maxTokens: 90,
   }
+}
+
+const PREFIXES: [RegExp, string][] = [
+  [/^SQ ?\*/i, '"SQ" means the seller takes cards through Square, a payment service many small shops use.'],
+  [/^TST ?\*/i, '"TST" means the seller takes cards through Toast, a payment service used by restaurants.'],
+  [/^(PAYPAL|PP) ?\*/i, 'The line starts with PayPal, so it was paid through a PayPal account.'],
+  [/^GOOGLE ?\*/i, '"GOOGLE *" means the charge was billed through a Google account, for example an app or a subscription.'],
+  [/^APPLE\.COM\/BILL/i, '"APPLE.COM/BILL" means the charge was billed through an Apple account, for example an app or a subscription.'],
+]
+
+/**
+ * What the payment prefix on a statement line means. This is looked up, not asked of the model:
+ * a small model will happily invent a meaning for "SQ".
+ */
+export function prefixNote(raw: string): string | null {
+  return PREFIXES.find(([re]) => re.test(raw.trim()))?.[1] ?? null
 }
 
 /** Turns a plain question into a query the app can compute itself. The model never does the sums. */

@@ -1,6 +1,6 @@
 import {FirebaseEngine, MockEngine, type DeviceState, type Engine} from '../ai/engine.ts'
 import {Runner, Stopped, type Policy} from '../ai/runner.ts'
-import {categoriseTask, draftTask, explainTask, questionTask, readCategories, readQuestion, strayAmounts, summaryFacts, summaryTask, type Task, type Tone} from '../ai/tasks.ts'
+import {categoriseTask, draftTask, explainTask, prefixNote, questionTask, readCategories, readQuestion, strayAmounts, summaryFacts, summaryTask, type Task, type Tone} from '../ai/tasks.ts'
 import {findAlerts, looseChange} from '../core/alerts.ts'
 import {answer, parseQuestion, targetForCategory, targetWithoutModel, type Answer, type Target} from '../core/ask.ts'
 import {CATEGORIES, category} from '../core/categories.ts'
@@ -625,12 +625,15 @@ function showWhy(button: HTMLElement, t: Txn, v: Verdict): void {
 async function explain(t: Txn): Promise<void> {
   const out = document.getElementById('explain-out')
   if (!out) return
-  out.textContent = 'Asking the model. Only the merchant name is used, never the amount or date…'
+  // What the payment prefix means is looked up here; the model is only asked what kind of business the name suggests.
+  const note = prefixNote(t.raw)
+  const lead = note ? `${note} ` : ''
+  out.textContent = `${lead}Asking the model. Only the merchant name is used, never the amount or date…`
   try {
-    const reply = await runner.run(explainTask(t.merchant), soFar => (out.textContent = soFar))
-    out.textContent = `${reply.text.trim()} (${reply.where === 'device' ? 'answered on this device' : 'answered in the cloud, with your OK'})`
+    const reply = await runner.run(explainTask(t.merchant), soFar => (out.textContent = lead + soFar))
+    out.textContent = `${lead}${reply.text.trim()} (${reply.where === 'device' ? 'answered on this device' : 'answered in the cloud, with your OK'})`
   } catch (err) {
-    out.textContent = reasonText(err)
+    out.textContent = lead + reasonText(err)
   }
 }
 

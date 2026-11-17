@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {MockEngine} from '../src/ai/engine.ts'
 import {Runner, Stopped, type Policy} from '../src/ai/runner.ts'
-import {categoriseTask, draftTask, explainTask, questionTask, readCategories, readQuestion, strayAmounts, summaryFacts, summaryTask} from '../src/ai/tasks.ts'
+import {categoriseTask, draftTask, explainTask, prefixNote, questionTask, readCategories, readQuestion, strayAmounts, summaryFacts, summaryTask} from '../src/ai/tasks.ts'
 import {findAlerts, looseChange} from '../src/core/alerts.ts'
 import {Classifier} from '../src/core/classify.ts'
 import {importStatement} from '../src/core/csv.ts'
@@ -155,4 +155,12 @@ test('summary: a figure the model made up is caught', () => {
   const facts = ['Money out $15,031.36, money in $15,052.10.', 'Netflix went up: From $15.49 to $17.99 a month. That is $30.00 more a year.']
   assert.deepEqual(strayAmounts('You spent $15,031.36 and Netflix now costs $17.99, $30 more a year.', facts), [])
   assert.deepEqual(strayAmounts('You spent $15,031.36 and lost $47.99 to Netflix.', facts), ['$47.99'])
+})
+
+test('explain: payment prefixes are looked up, not asked of the model', () => {
+  assert.match(prefixNote('SQ *THINKING CUP BOSTON MA')!, /Square/)
+  assert.match(prefixNote('TST* LA CASA DE PEDRO WATERTOWN MA')!, /Toast/)
+  assert.match(prefixNote('PAYPAL *STEAMGAMES')!, /PayPal/)
+  assert.equal(prefixNote('STARBUCKS STORE 07342 BOSTON MA'), null)
+  assert.ok(!/SQ|TST|PAYPAL/.test(explainTask('thinking cup').prompt))
 })
