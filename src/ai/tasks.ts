@@ -55,7 +55,7 @@ export function categoriseTask(merchants: string[]): Task {
     label: 'Sort unfamiliar merchants',
     system:
       'You sort merchant names from a bank statement into spending categories. Names are cut short and written the way banks write them. ' +
-      'Answer for every name, in the same order. Set "sure" to false when the name does not tell you what the business sells.',
+      'Give exactly one answer per name, in the same order as the list. Set "sure" to false when the name does not tell you what the business sells.',
     prompt:
       `Categories:\n${SPENDING.map(c => `- ${c.id}: ${CATEGORY_HINTS[c.id]}`).join('\n')}\n\n` +
       `Merchants:\n${merchants.map((m, i) => `${i + 1}. ${m}`).join('\n')}`,
@@ -63,15 +63,19 @@ export function categoriseTask(merchants: string[]): Task {
       type: 'array',
       items: {
         type: 'object',
-        properties: {name: {type: 'string'}, category: {type: 'string', enum: SPENDING.map(c => c.id)}, sure: {type: 'boolean'}},
-        required: ['name', 'category', 'sure'],
+        properties: {category: {type: 'string', enum: SPENDING.map(c => c.id)}, sure: {type: 'boolean'}},
+        required: ['category', 'sure'],
       },
     },
-    maxTokens: 40 + merchants.length * 30,
+    maxTokens: 300 + merchants.length * 40,
   }
 }
 
-/** Reads the model's reply for `categoriseTask`. Unknown names and categories are dropped, never guessed. */
+/**
+ * Reads the model's reply for `categoriseTask`. Answers are matched to names by position, so a
+ * reply with the wrong number of answers is rejected whole (the caller then asks again in
+ * smaller batches). Unknown categories are dropped, never guessed.
+ */
 export function readCategories(reply: string, merchants: string[]): Map<string, {category: CategoryId; sure: boolean}> {
   const out = new Map<string, {category: CategoryId; sure: boolean}>()
   let rows: unknown
@@ -81,16 +85,13 @@ export function readCategories(reply: string, merchants: string[]): Map<string, 
     return out
   }
   if (!Array.isArray(rows)) return out
+  if (rows.length !== merchants.length) return out
   const valid = new Set<string>(SPENDING.map(c => c.id))
   rows.forEach((row, i) => {
     if (!row || typeof row !== 'object') return
-    const r = row as {name?: unknown; category?: unknown; sure?: unknown}
+    const r = row as {category?: unknown; sure?: unknown}
     if (typeof r.category !== 'string' || !valid.has(r.category)) return
-    // Trust the position when the count matches; otherwise match by name.
-    const byName = typeof r.name === 'string' ? merchants.find(m => m === r.name!.toString().toLowerCase().trim()) : undefined
-    const name = rows.length === merchants.length ? merchants[i] : byName
-    if (!name || out.has(name)) return
-    out.set(name, {category: r.category as CategoryId, sure: r.sure !== false})
+    out.set(merchants[i]!, {category: r.category as CategoryId, sure: r.sure !== false})
   })
   return out
 }

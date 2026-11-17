@@ -3,12 +3,12 @@
  * secrets (every Firebase web app ships them). What protects the Gemini API is App Check.
  */
 export const firebaseConfig = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyB3iRGJe8YtjJOdFs2E90UrTp7Zaw9YWIk',
+  authDomain: 'clawback-4f5ed.firebaseapp.com',
+  projectId: 'clawback-4f5ed',
+  storageBucket: 'clawback-4f5ed.firebasestorage.app',
+  messagingSenderId: '913723773422',
+  appId: '1:913723773422:web:82aeb6ecd2252043803eff',
 }
 
 /** reCAPTCHA Enterprise site key registered with App Check for the live site. Empty: debug provider only. */

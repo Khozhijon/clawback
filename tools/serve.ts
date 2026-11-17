@@ -17,6 +17,13 @@ const types: Record<string, string> = {
 http
   .createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
+    // Local development only: hands the App Check debug token kept in an untracked file to the
+    // page, so the token never has to be written into the source or a URL.
+    if (url.pathname === '/__appcheck') {
+      const file = path.join(root, '..', '.appcheck-debug-token')
+      const token = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : ''
+      return void res.writeHead(token ? 200 : 404, {'content-type': 'text/plain', 'cache-control': 'no-store'}).end(token)
+    }
     let file = path.normalize(path.join(root, decodeURIComponent(url.pathname)))
     if (!file.startsWith(root)) return void res.writeHead(403).end()
     if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html')

@@ -39,15 +39,32 @@ export class FirebaseEngine implements Engine {
   private ai: AI | null = null
   private models = new Map<string, GenerativeModel>()
 
+  /** On a development machine, the debug token comes from the local server, never from the source. */
+  private localToken: string | null = null
+
+  async ready(): Promise<void> {
+    if (this.localToken !== null || !configured) return
+    this.localToken = ''
+    if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return
+    try {
+      const res = await fetch('./__appcheck', {cache: 'no-store'})
+      if (res.ok) this.localToken = (await res.text()).trim()
+    } catch {
+      // No local token: the debug provider will print a new one to register.
+    }
+  }
+
   private start(): AI {
     if (this.ai) return this.ai
     // On-device inference needs no network, but the SDK still wants an app to hang on to.
     this.app = initializeApp(configured ? firebaseConfig : {apiKey: 'not-configured', projectId: 'not-configured', appId: 'not-configured'})
     if (configured) {
       const debug = new URLSearchParams(location.search).get('appcheck')
+      const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       if (debug) (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = debug === 'new' ? true : debug
-      else if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true
+      else if (local) (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = this.localToken || true
       initializeAppCheck(this.app, {
+        // With a debug token set, the SDK uses it and never calls the provider.
         provider: RECAPTCHA_ENTERPRISE_SITE_KEY
           ? new ReCaptchaEnterpriseProvider(RECAPTCHA_ENTERPRISE_SITE_KEY)
           : new CustomProvider({getToken: () => Promise.reject(new Error('App Check has no provider for this address. Open the page with ?appcheck=new and register the token.'))}),
@@ -94,6 +111,7 @@ export class FirebaseEngine implements Engine {
   }
 
   async prepareDevice(onProgress: (fraction: number) => void): Promise<void> {
+    await this.ready()
     const model = getGenerativeModel(this.start(), {mode: InferenceMode.ONLY_ON_DEVICE, onDeviceParams: {createOptions: EXPECTED as any}})
     await model.initializeDeviceModel(onProgress)
   }
@@ -104,6 +122,7 @@ export class FirebaseEngine implements Engine {
 
   async run(task: Task, where: Where, onText?: (soFar: string) => void): Promise<Reply> {
     if (where === 'cloud' && !configured) throw new Error('No Firebase project is configured, so nothing can be sent to the cloud.')
+    await this.ready()
     const started = performance.now()
     const model = this.model(task, where)
     if (onText) {

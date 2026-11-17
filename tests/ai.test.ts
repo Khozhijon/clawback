@@ -26,17 +26,18 @@ test('categorise: the prompt lists every merchant and the reply is read strictly
   const task = categoriseTask(names)
   for (const n of names) assert.ok(task.prompt.includes(n))
   assert.equal(task.schema?.type, 'array')
-  const good = readCategories(JSON.stringify([{name: 'x', category: 'eating_out', sure: true}, {name: 'y', category: 'coffee', sure: false}, {name: 'z', category: 'housing', sure: true}]), names)
+  const good = readCategories(JSON.stringify([{category: 'eating_out', sure: true}, {category: 'coffee', sure: false}, {category: 'housing', sure: true}]), names)
   assert.deepEqual(good.get('golden dragon noodle house'), {category: 'eating_out', sure: true})
   assert.deepEqual(good.get('thinking cup'), {category: 'coffee', sure: false})
-  // A made-up category, a category the app never lets the model choose, and junk are all dropped.
-  const bad = readCategories(JSON.stringify([{name: 'golden dragon noodle house', category: 'casino', sure: true}, {name: 'thinking cup', category: 'income', sure: true}, 'junk']), names)
-  assert.equal(bad.size, 0)
+  assert.deepEqual(good.get('cedar court apartments'), {category: 'housing', sure: true})
+  // A made-up category and a category the app never lets the model choose are dropped.
+  const bad = readCategories(JSON.stringify([{category: 'casino', sure: true}, {category: 'income', sure: true}, {category: 'housing', sure: true}]), names)
+  assert.deepEqual([...bad.keys()], ['cedar court apartments'])
   assert.equal(readCategories('not json', names).size, 0)
   assert.equal(readCategories('{"a":1}', names).size, 0)
-  // Fewer rows than names: matched by name only, never by position.
-  const partial = readCategories(JSON.stringify([{name: 'Thinking Cup', category: 'coffee', sure: true}]), names)
-  assert.deepEqual([...partial.keys()], ['thinking cup'])
+  // The wrong number of answers cannot be matched to names, so nothing is trusted.
+  assert.equal(readCategories(JSON.stringify([{category: 'coffee', sure: true}]), names).size, 0)
+  assert.equal(readCategories('[{"category":"coffee","sure":true},{"category":"coffee","sure"', names).size, 0, 'a reply cut short is rejected')
 })
 
 test('draft: only facts from the statement go into the prompt', () => {

@@ -201,13 +201,23 @@ async function sortUnfamiliar(s: State): Promise<void> {
   s.sortNote = ''
   paintStatus()
   try {
-    for (;;) {
-      const batch = unfamiliar(s).slice(0, 15)
-      if (!batch.length || state !== s) break
+    // A reply that cannot be matched to the names is asked again in halves; a single name the
+    // model still cannot place is filed under Other as a guess, so the loop always ends.
+    const sortBatch = async (batch: string[]): Promise<void> => {
       const reply = await runner.run(categoriseTask(batch))
       const read = readCategories(reply.text, batch)
-      // Whatever the model skipped is marked as tried, so the loop always moves on.
+      if (read.size < batch.length && batch.length > 1) {
+        const half = Math.ceil(batch.length / 2)
+        await sortBatch(batch.slice(0, half))
+        await sortBatch(batch.slice(half))
+        return
+      }
       for (const m of batch) classifier.ai.set(m, {category: read.get(m)?.category ?? 'other', sure: read.get(m)?.sure ?? false, where: reply.where})
+    }
+    for (;;) {
+      const batch = unfamiliar(s).slice(0, 12)
+      if (!batch.length || state !== s) break
+      await sortBatch(batch)
       classifyAll(s)
       paint()
     }
