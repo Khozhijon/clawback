@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {MockEngine} from '../src/ai/engine.ts'
 import {Runner, Stopped, type Policy} from '../src/ai/runner.ts'
-import {categoriseTask, draftTask, explainTask, questionTask, readCategories, readQuestion, summaryFacts, summaryTask} from '../src/ai/tasks.ts'
+import {categoriseTask, draftTask, explainTask, questionTask, readCategories, readQuestion, strayAmounts, summaryFacts, summaryTask} from '../src/ai/tasks.ts'
 import {findAlerts, looseChange} from '../src/core/alerts.ts'
 import {Classifier} from '../src/core/classify.ts'
 import {importStatement} from '../src/core/csv.ts'
@@ -26,18 +26,19 @@ test('categorise: the prompt lists every merchant and the reply is read strictly
   const task = categoriseTask(names)
   for (const n of names) assert.ok(task.prompt.includes(n))
   assert.equal(task.schema?.type, 'array')
-  const good = readCategories(JSON.stringify([{category: 'eating_out', sure: true}, {category: 'coffee', sure: false}, {category: 'housing', sure: true}]), names)
-  assert.deepEqual(good.get('golden dragon noodle house'), {category: 'eating_out', sure: true})
+  const good = readCategories(JSON.stringify([{name: 'thinking cup', category: 'coffee', sure: false}, {name: 'golden dragon noodle house', category: 'eating_out', sure: true}, {name: 'cedar court apartments', category: 'housing', sure: true}]), names)
+  assert.deepEqual(good.get('golden dragon noodle house'), {category: 'eating_out', sure: true}, 'answers are matched by name, in any order')
   assert.deepEqual(good.get('thinking cup'), {category: 'coffee', sure: false})
   assert.deepEqual(good.get('cedar court apartments'), {category: 'housing', sure: true})
-  // A made-up category and a category the app never lets the model choose are dropped.
-  const bad = readCategories(JSON.stringify([{category: 'casino', sure: true}, {category: 'income', sure: true}, {category: 'housing', sure: true}]), names)
+  // A made-up category, a category the app never lets the model choose and a name that was not asked about are dropped.
+  const bad = readCategories(JSON.stringify([{name: 'thinking cup', category: 'casino', sure: true}, {name: 'golden dragon noodle house', category: 'income', sure: true}, {name: 'someone else', category: 'coffee', sure: true}, {name: 'cedar court apartments', category: 'housing', sure: true}]), names)
   assert.deepEqual([...bad.keys()], ['cedar court apartments'])
   assert.equal(readCategories('not json', names).size, 0)
   assert.equal(readCategories('{"a":1}', names).size, 0)
-  // The wrong number of answers cannot be matched to names, so nothing is trusted.
-  assert.equal(readCategories(JSON.stringify([{category: 'coffee', sure: true}]), names).size, 0)
-  assert.equal(readCategories('[{"category":"coffee","sure":true},{"category":"coffee","sure"', names).size, 0, 'a reply cut short is rejected')
+  // A missing answer leaves that merchant unanswered; a second answer for the same name is ignored.
+  const partial = readCategories(JSON.stringify([{name: 'thinking cup', category: 'coffee', sure: true}, {name: 'thinking cup', category: 'fun', sure: true}]), names)
+  assert.deepEqual([...partial.entries()], [['thinking cup', {category: 'coffee', sure: true}]])
+  assert.equal(readCategories('[{"name":"thinking cup","category":"coffee","sure":true},{"name":"cedar', names).size, 0, 'a reply cut short is rejected')
 })
 
 test('draft: only facts from the statement go into the prompt', () => {
@@ -148,4 +149,10 @@ test('routing: streaming delivers the text as it grows', async () => {
   assert.ok(seen.length > 2)
   assert.equal(seen[seen.length - 1], reply.text)
   assert.ok(seen.every((t, i) => i === 0 || t.length >= seen[i - 1]!.length))
+})
+
+test('summary: a figure the model made up is caught', () => {
+  const facts = ['Money out $15,031.36, money in $15,052.10.', 'Netflix went up: From $15.49 to $17.99 a month. That is $30.00 more a year.']
+  assert.deepEqual(strayAmounts('You spent $15,031.36 and Netflix now costs $17.99, $30 more a year.', facts), [])
+  assert.deepEqual(strayAmounts('You spent $15,031.36 and lost $47.99 to Netflix.', facts), ['$47.99'])
 })

@@ -55,26 +55,29 @@ export function categoriseTask(merchants: string[]): Task {
     label: 'Sort unfamiliar merchants',
     system:
       'You sort merchant names from a bank statement into spending categories. Names are cut short and written the way banks write them. ' +
-      'Give exactly one answer per name, in the same order as the list. Set "sure" to false when the name does not tell you what the business sells.',
+      'Give one answer for every name on the list, each starting with the name exactly as written. Set "sure" to false when the name does not tell you what the business sells.',
     prompt:
       `Categories:\n${SPENDING.map(c => `- ${c.id}: ${CATEGORY_HINTS[c.id]}`).join('\n')}\n\n` +
       `Merchants:\n${merchants.map((m, i) => `${i + 1}. ${m}`).join('\n')}`,
+    // Each answer starts by repeating the name it is for (from this list only), so an answer can
+    // never be pinned on the wrong merchant, however many the model returns.
     schema: {
       type: 'array',
       items: {
         type: 'object',
-        properties: {category: {type: 'string', enum: SPENDING.map(c => c.id)}, sure: {type: 'boolean'}},
-        required: ['category', 'sure'],
+        properties: {name: {type: 'string', enum: merchants}, category: {type: 'string', enum: SPENDING.map(c => c.id)}, sure: {type: 'boolean'}},
+        required: ['name', 'category', 'sure'],
       },
     },
-    maxTokens: 300 + merchants.length * 40,
+    maxTokens: 300 + merchants.length * 60,
   }
 }
 
 /**
- * Reads the model's reply for `categoriseTask`. Answers are matched to names by position, so a
- * reply with the wrong number of answers is rejected whole (the caller then asks again in
- * smaller batches). Unknown categories are dropped, never guessed.
+ * Reads the model's reply for `categoriseTask`: a list of {name, category, sure}. Answers are
+ * matched by name, so a missing or extra answer cannot shift the others. A name that is not on
+ * the list, or a category the app does not offer, is dropped, never guessed. The first answer
+ * for a name wins.
  */
 export function readCategories(reply: string, merchants: string[]): Map<string, {category: CategoryId; sure: boolean}> {
   const out = new Map<string, {category: CategoryId; sure: boolean}>()
@@ -85,14 +88,15 @@ export function readCategories(reply: string, merchants: string[]): Map<string, 
     return out
   }
   if (!Array.isArray(rows)) return out
-  if (rows.length !== merchants.length) return out
+  const asked = new Set(merchants)
   const valid = new Set<string>(SPENDING.map(c => c.id))
-  rows.forEach((row, i) => {
-    if (!row || typeof row !== 'object') return
-    const r = row as {category?: unknown; sure?: unknown}
-    if (typeof r.category !== 'string' || !valid.has(r.category)) return
-    out.set(merchants[i]!, {category: r.category as CategoryId, sure: r.sure !== false})
-  })
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const r = row as {name?: unknown; category?: unknown; sure?: unknown}
+    if (typeof r.name !== 'string' || !asked.has(r.name) || out.has(r.name)) continue
+    if (typeof r.category !== 'string' || !valid.has(r.category)) continue
+    out.set(r.name, {category: r.category as CategoryId, sure: r.sure !== false})
+  }
   return out
 }
 
@@ -217,7 +221,7 @@ export function readQuestion(reply: string, question: string, endDay: Day, known
 export function summaryTask(facts: string[]): Task {
   return {
     label: 'Write a plain summary',
-    system: 'You summarise a bank statement for its owner in four or five plain sentences. Use only the facts given and repeat amounts exactly. No advice about what to cancel, no markdown, no greeting.',
+    system: 'You summarise a bank statement for its owner in four or five plain sentences. Use only the facts given and repeat amounts exactly as written. Never add up, combine or round amounts yourself. No advice about what to cancel, no markdown, no greeting.',
     prompt: `Facts:\n${facts.map(f => `- ${f}`).join('\n')}`,
     maxTokens: 220,
   }
@@ -231,7 +235,21 @@ export function summaryFacts(o: {start: Day; end: Day; spent: number; cameIn: nu
     `Largest spending categories: ${o.top.slice(0, 3).map(c => `${c.label} ${money(c.total)}`).join(', ')}.`,
     `${o.regular.filter(r => r.active).length} regular charges cost ${money(o.regular.filter(r => r.active && r.category !== 'transfers').reduce((s, r) => s + r.yearly, 0), true)} a year.`,
   ]
-  for (const a of o.alerts.slice(0, 6)) facts.push(`${a.title}: ${a.detail}`)
+  for (const a of o.alerts.slice(0, 6)) {
+    // A double charge is the easiest fact for a small model to garble, so it is spelled out.
+    if (a.kind === 'duplicate') facts.push(`${a.title}: ${money(a.amount)} each time. One of the two charges looks like a mistake.`)
+    else facts.push(`${a.title}: ${a.detail}`)
+  }
   if (o.loose > 0) facts.push(`Fees, price rises and double charges add up to ${money(o.loose, true)} a year.`)
   return facts
+}
+
+/**
+ * Dollar amounts in a model's reply that appear nowhere in the facts it was given.
+ * The model words the summary; it is not allowed to produce a figure of its own.
+ */
+export function strayAmounts(reply: string, facts: string[]): string[] {
+  const plain = (t: string) => t.replace(/,/g, '').replace(/\.00\b/g, '')
+  const known = new Set((plain(facts.join(' ')).match(/\$\d+(?:\.\d+)?/g) ?? []))
+  return [...new Set((plain(reply).match(/\$\d+(?:\.\d+)?/g) ?? []).filter(a => !known.has(a)))]
 }

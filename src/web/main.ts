@@ -1,6 +1,6 @@
 import {FirebaseEngine, MockEngine, type DeviceState, type Engine} from '../ai/engine.ts'
 import {Runner, Stopped, type Policy} from '../ai/runner.ts'
-import {categoriseTask, draftTask, explainTask, questionTask, readCategories, readQuestion, summaryFacts, summaryTask, type Task, type Tone} from '../ai/tasks.ts'
+import {categoriseTask, draftTask, explainTask, questionTask, readCategories, readQuestion, strayAmounts, summaryFacts, summaryTask, type Task, type Tone} from '../ai/tasks.ts'
 import {findAlerts, looseChange} from '../core/alerts.ts'
 import {answer, parseQuestion, targetForCategory, targetWithoutModel, type Answer, type Target} from '../core/ask.ts'
 import {CATEGORIES, category} from '../core/categories.ts'
@@ -201,18 +201,22 @@ async function sortUnfamiliar(s: State): Promise<void> {
   s.sortNote = ''
   paintStatus()
   try {
-    // A reply that cannot be matched to the names is asked again in halves; a single name the
-    // model still cannot place is filed under Other as a guess, so the loop always ends.
+    // Answers the model gave are kept. Names it skipped are asked again (in halves when it skipped
+    // them all); a single name it still cannot place is filed under Other as a guess, so this always ends.
     const sortBatch = async (batch: string[]): Promise<void> => {
       const reply = await runner.run(categoriseTask(batch))
       const read = readCategories(reply.text, batch)
-      if (read.size < batch.length && batch.length > 1) {
-        const half = Math.ceil(batch.length / 2)
-        await sortBatch(batch.slice(0, half))
-        await sortBatch(batch.slice(half))
+      for (const [m, v] of read) classifier.ai.set(m, {...v, where: reply.where})
+      const missing = batch.filter(m => !read.has(m))
+      if (!missing.length) return
+      if (batch.length === 1) {
+        classifier.ai.set(batch[0]!, {category: 'other', sure: false, where: reply.where})
         return
       }
-      for (const m of batch) classifier.ai.set(m, {category: read.get(m)?.category ?? 'other', sure: read.get(m)?.sure ?? false, where: reply.where})
+      if (missing.length < batch.length) return sortBatch(missing)
+      const half = Math.ceil(batch.length / 2)
+      await sortBatch(batch.slice(0, half))
+      await sortBatch(batch.slice(half))
     }
     for (;;) {
       const batch = unfamiliar(s).slice(0, 12)
@@ -543,11 +547,15 @@ async function plainWords(s: State): Promise<void> {
   paint()
   try {
     const facts = summaryFacts({start: s.summary.startDay, end: s.summary.endDay, spent: s.summary.spent, cameIn: s.summary.cameIn, top: s.summary.byCategory.map(c => ({label: category(c.id).label, total: c.total})), regular: s.recurring, alerts: s.alerts, loose: looseChange(s.alerts)})
-    const reply = await runner.run(summaryTask(facts), soFar => {
+    const write = () => runner.run(summaryTask(facts), soFar => {
       const el = document.getElementById('plain-text')
       if (el && state === s) el.textContent = soFar
     })
-    s.plain = {text: reply.text.trim(), note: whereLine(reply.where, reply.ms)}
+    let reply = await write()
+    // The model only words the summary. If it produced a figure that is not in the facts, try once more, then show the facts themselves.
+    if (strayAmounts(reply.text, facts).length > 0) reply = await write()
+    if (strayAmounts(reply.text, facts).length > 0) s.plain = {text: facts.join(' '), note: 'The model changed a figure twice, so these are the facts as computed, word for word.'}
+    else s.plain = {text: reply.text.trim(), note: whereLine(reply.where, reply.ms)}
   } catch (err) {
     s.plain = null
     toast(reasonText(err))

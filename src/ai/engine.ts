@@ -87,7 +87,7 @@ export class FirebaseEngine implements Engine {
           generationConfig: {
             maxOutputTokens: task.maxTokens,
             temperature: task.schema ? 0 : 0.4,
-            ...(task.schema ? {responseMimeType: 'application/json', responseSchema: task.schema as any} : {}),
+            ...(task.schema ? {responseMimeType: 'application/json', responseSchema: ordered(task.schema) as any} : {}),
           },
         },
         onDeviceParams: {
@@ -190,6 +190,17 @@ export class MockEngine implements Engine {
     }
     return {text, where, ms: 40}
   }
+}
+
+/** Gemini in the cloud writes properties in the order given by `propertyOrdering`; the on-device model follows the schema as written. */
+function ordered(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object') return schema
+  if (Array.isArray(schema)) return schema.map(ordered)
+  const s = schema as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(s)) out[k] = k === 'properties' && v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([name, sub]) => [name, ordered(sub)])) : k === 'items' ? ordered(v) : v
+  if (s.type === 'object' && s.properties && typeof s.properties === 'object') out.propertyOrdering = Object.keys(s.properties)
+  return out
 }
 
 function mockReply(task: Task): string {
