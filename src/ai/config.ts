@@ -11,8 +11,8 @@ export const firebaseConfig = {
   appId: '1:913723773422:web:82aeb6ecd2252043803eff',
 }
 
-/** reCAPTCHA Enterprise site key registered with App Check for the live site. Empty: debug provider only. */
-export const RECAPTCHA_ENTERPRISE_SITE_KEY = ''
+/** reCAPTCHA Enterprise site key registered with App Check for khozhijon.github.io. Public by design; on localhost a debug token is used instead. */
+export const RECAPTCHA_ENTERPRISE_SITE_KEY = '6LcarCcuAAAAAOfZeuMnrkzejP6w4F5y3zHI1mZn'
 
 /** The cloud model used when the user allows a request to leave the device. */
 export const CLOUD_MODEL = 'gemini-3.5-flash-lite'

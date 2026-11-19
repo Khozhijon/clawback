@@ -49,7 +49,8 @@ merchant that is not in the statement is dropped, not trusted (`src/ai/tasks.ts`
   choice, asks for consent, and keeps the ledger.
 - `src/ai/tasks.ts`: every prompt as plain data, so the consent dialog shows the very text the
   model receives.
-- **App Check** protects the cloud path. The page's Content Security Policy only allows
+- **App Check** protects the cloud path: reCAPTCHA Enterprise on the live site, a debug token on a
+  development machine. The page's Content Security Policy only allows
   connections to its own address and to Firebase.
 
 ## What testing with the real models changed
