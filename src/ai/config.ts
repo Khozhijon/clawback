@@ -12,7 +12,7 @@ export const firebaseConfig = {
 }
 
 /** reCAPTCHA Enterprise site key registered with App Check for khozhijon.github.io. Public by design; on localhost a debug token is used instead. */
-export const RECAPTCHA_ENTERPRISE_SITE_KEY = '6LcarCcuAAAAAOfZeuMnrkzejP6w4F5y3zHI1mZn'
+export const RECAPTCHA_ENTERPRISE_SITE_KEY: string = '6LcarCcuAAAAAOfZeuMnrkzejP6w4F5y3zHI1mZn'
 
 /** The cloud model used when the user allows a request to leave the device. */
 export const CLOUD_MODEL = 'gemini-3.5-flash-lite'
