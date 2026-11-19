@@ -6,3 +6,5 @@ submission/video-tmp/
 submission/*.zip
 submission/DEVPOST.md
 .appcheck-debug-token
+submission/*.webm
+submission/shots/
